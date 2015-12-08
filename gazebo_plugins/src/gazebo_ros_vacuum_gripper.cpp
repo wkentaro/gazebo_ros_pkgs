@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <assert.h>
 
+#include <std_msgs/Bool.h>
 #include <gazebo_plugins/gazebo_ros_vacuum_gripper.h>
 
 namespace gazebo
@@ -34,6 +35,7 @@ GZ_REGISTER_MODEL_PLUGIN(GazeboRosVacuumGripper);
 // Constructor
 GazeboRosVacuumGripper::GazeboRosVacuumGripper()
 {
+  connect_count_ = 0;
   status_ = false;
 }
 
@@ -91,14 +93,13 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
     return;
   }
 
-  if (!_sdf->HasElement("serviceName"))
+  if (!_sdf->HasElement("topicName"))
   {
     ROS_FATAL("vacuum_gripper plugin missing <serviceName>, cannot proceed");
     return;
   }
   else
-    service_name_ = _sdf->GetElement("serviceName")->Get<std::string>();
-
+    topic_name_ = _sdf->GetElement("topicName")->Get<std::string>();
 
   // Make sure the ROS node for Gazebo has already been initialized
   if (!ros::isInitialized())
@@ -111,11 +112,24 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
   rosnode_ = new ros::NodeHandle(robot_namespace_);
 
   // Custom Callback Queue
-  ros::AdvertiseServiceOptions aso =
+  ros::AdvertiseOptions ao = ros::AdvertiseOptions::create<std_msgs::Bool>(
+    topic_name_, 1,
+    boost::bind(&GazeboRosVacuumGripper::Connect, this),
+    boost::bind(&GazeboRosVacuumGripper::Disconnect, this),
+    ros::VoidPtr(), &queue_);
+  pub_ = rosnode_->advertise(ao);
+
+  // Custom Callback Queue
+  ros::AdvertiseServiceOptions aso1 =
     ros::AdvertiseServiceOptions::create<std_srvs::Empty>(
-    service_name_, boost::bind(&GazeboRosVacuumGripper::ServiceCallback,
+    "on", boost::bind(&GazeboRosVacuumGripper::OnServiceCallback,
     this, _1, _2), ros::VoidPtr(), &queue_);
-  srv_ = rosnode_->advertiseService(aso);
+  srv1_ = rosnode_->advertiseService(aso1);
+  ros::AdvertiseServiceOptions aso2 =
+    ros::AdvertiseServiceOptions::create<std_srvs::Empty>(
+    "off", boost::bind(&GazeboRosVacuumGripper::OffServiceCallback,
+    this, _1, _2), ros::VoidPtr(), &queue_);
+  srv2_ = rosnode_->advertiseService(aso2);
 
   // Custom Callback Queue
   callback_queue_thread_ = boost::thread( boost::bind( &GazeboRosVacuumGripper::QueueThread,this ) );
@@ -129,15 +143,18 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
   ROS_INFO("Loaded gazebo_ros_vacuum_gripper");
 }
 
-bool GazeboRosVacuumGripper::ServiceCallback(std_srvs::Empty::Request &req,
+bool GazeboRosVacuumGripper::OnServiceCallback(std_srvs::Empty::Request &req,
                                      std_srvs::Empty::Response &res)
 {
-  if (status_) {
-    status_ = false;
-  } else {
-    status_ = true;
-  }
-  ROS_INFO("status: %s", status_ ? "true" : "false");
+  status_ = true;
+  ROS_INFO("gazebo_ros_vacuum_gripper: status: off -> on");
+  return true;
+}
+bool GazeboRosVacuumGripper::OffServiceCallback(std_srvs::Empty::Request &req,
+                                     std_srvs::Empty::Response &res)
+{
+  status_ = false;
+  ROS_INFO("gazebo_ros_vacuum_gripper: status: on -> off");
   return true;
 }
 
@@ -145,6 +162,8 @@ bool GazeboRosVacuumGripper::ServiceCallback(std_srvs::Empty::Request &req,
 // Update the controller
 void GazeboRosVacuumGripper::UpdateChild()
 {
+  std_msgs::Bool grasping_msg;
+  grasping_msg.data = false;
   if (!status_) {
     return;
   }
@@ -180,8 +199,12 @@ void GazeboRosVacuumGripper::UpdateChild()
         math::Vector3 force = norm_force * diff.pos.Normalize();
         links[j]->AddForce(force);
       }
+      if (norm < 0.2) {
+        grasping_msg.data = true;
+      }
     }
   }
+  pub_.publish(grasping_msg);
   lock_.unlock();
 }
 
@@ -196,6 +219,20 @@ void GazeboRosVacuumGripper::QueueThread()
   {
     queue_.callAvailable(ros::WallDuration(timeout));
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Someone subscribes to me
+void GazeboRosVacuumGripper::Connect()
+{
+  this->connect_count_++;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Someone subscribes to me
+void GazeboRosVacuumGripper::Disconnect()
+{
+  this->connect_count_--;
 }
 
 }  // namespace gazebo

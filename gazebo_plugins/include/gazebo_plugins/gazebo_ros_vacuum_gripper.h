@@ -27,6 +27,7 @@
 
 // Custom Callback Queue
 #include <ros/callback_queue.h>
+#include <ros/advertise_options.h>
 #include <ros/advertise_service_options.h>
 #include <std_srvs/Empty.h>
 
@@ -81,7 +82,9 @@ class GazeboRosVacuumGripper : public ModelPlugin
   /// \brief The custom callback queue thread function.
   private: void QueueThread();
 
-  private: bool ServiceCallback(std_srvs::Empty::Request &req,
+  private: bool OnServiceCallback(std_srvs::Empty::Request &req,
+                                std_srvs::Empty::Response &res);
+  private: bool OffServiceCallback(std_srvs::Empty::Request &req,
                                 std_srvs::Empty::Response &res);
 
   private: bool status_;
@@ -99,9 +102,12 @@ class GazeboRosVacuumGripper : public ModelPlugin
 
   /// \brief A mutex to lock access to fields that are used in ROS message callbacks
   private: boost::mutex lock_;
-  private: ros::ServiceServer srv_;
+  private: ros::Publisher pub_;
+  private: ros::ServiceServer srv1_;
+  private: ros::ServiceServer srv2_;
 
   /// \brief ROS Wrench topic name inputs
+  private: std::string topic_name_;
   private: std::string service_name_;
   /// \brief The Link this plugin is attached to, and will exert forces on.
   private: std::string link_name_;
@@ -116,6 +122,11 @@ class GazeboRosVacuumGripper : public ModelPlugin
 
   // Pointer to the update event connection
   private: event::ConnectionPtr update_connection_;
+
+  /// \brief: keep track of number of connections
+  private: int connect_count_;
+  private: void Connect();
+  private: void Disconnect();
 };
 /** \} */
 /// @}
