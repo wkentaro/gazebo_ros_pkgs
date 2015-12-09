@@ -173,6 +173,7 @@ void GazeboRosVacuumGripper::UpdateChild()
   std_msgs::Bool grasping_msg;
   grasping_msg.data = false;
   if (!status_) {
+    pub_.publish(grasping_msg);
     return;
   }
   // apply force
@@ -185,29 +186,34 @@ void GazeboRosVacuumGripper::UpdateChild()
     {
       continue;
     }
-    bool printed = false;
+    // bool printed = false;
     physics::Link_V links = models[i]->GetLinks();
     for (size_t j = 0; j < links.size(); j++) {
       math::Pose link_pose = links[j]->GetWorldPose();
       math::Pose diff = parent_pose - link_pose;
       double norm = diff.pos.GetLength();
-      if (norm < 0.2) {
+      if (norm < 0.05) {
         links[j]->SetLinearAccel(link_->GetWorldLinearAccel());
         links[j]->SetAngularAccel(link_->GetWorldAngularAccel());
         links[j]->SetLinearVel(link_->GetWorldLinearVel());
         links[j]->SetAngularVel(link_->GetWorldAngularVel());
-        double norm_force = 2 / norm;
-        if (!printed) {
-          ROS_INFO_STREAM("Inhaling " << models[i]->GetName() << " with force " << norm_force);
-          printed = true;
+        double norm_force = 1 / norm;
+        if (norm < 0.01) {
+          // apply friction like force
+          link_pose.Set(parent_pose.pos, link_pose.rot);
+          links[j]->SetWorldPose(link_pose);
         }
-        if (norm_force > 10) {
-          norm_force = 10;  // max_force
+        if (norm_force > 20) {
+          norm_force = 20;  // max_force
         }
+        // if (!printed) {
+        //   ROS_INFO_STREAM("Inhaling " << models[i]->GetName() << " with force: " << norm_force << " norm: " << norm);
+        //   printed = true;
+        // }
         math::Vector3 force = norm_force * diff.pos.Normalize();
         links[j]->AddForce(force);
+        grasping_msg.data = true;
       }
-      grasping_msg.data = true;
     }
   }
   pub_.publish(grasping_msg);
