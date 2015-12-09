@@ -20,15 +20,16 @@
  * Date: 24 Sept 2008
  */
 
-#ifndef GAZEBO_ROS_FORCE_HH
-#define GAZEBO_ROS_FORCE_HH
+#ifndef GAZEBO_ROS_VACUUM_GRIPPER_HH
+#define GAZEBO_ROS_VACUUM_GRIPPER_HH
 
 #include <string>
 
 // Custom Callback Queue
 #include <ros/callback_queue.h>
-#include <ros/subscribe_options.h>
-#include <geometry_msgs/Wrench.h>
+#include <ros/advertise_options.h>
+#include <ros/advertise_service_options.h>
+#include <std_srvs/Empty.h>
 
 #include <ros/ros.h>
 #include <boost/thread.hpp>
@@ -44,37 +45,33 @@ namespace gazebo
 {
 /// @addtogroup gazebo_dynamic_plugins Gazebo ROS Dynamic Plugins
 /// @{
-/** \defgroup GazeboRosForce Plugin XML Reference and Example
+/** \defgroup GazeboRosVacuumGripper Plugin XML Reference and Example
 
-  \brief Ros Force Plugin.
-  
+  \brief Ros Vacuum Gripper Plugin.
+
   This is a Plugin that collects data from a ROS topic and applies wrench to a body accordingly.
 
   Example Usage:
   \verbatim
       <gazebo>
-        <plugin filename="libgazebo_ros_force.so" name="gazebo_ros_force">
+        <plugin filename="libgazebo_ros_vacuum_gripper.so" name="gazebo_ros_vacuum_gripper">
           <bodyName>box_body</bodyName>
-          <topicName>box_force</topicName>
+          <serviceName>box_force</serviceName>
         </plugin>
       </gazebo>
   \endverbatim
- 
+
 \{
 */
 
-/**
-           .
- 
-*/
 
-class GazeboRosForce : public ModelPlugin
+class GazeboRosVacuumGripper : public ModelPlugin
 {
   /// \brief Constructor
-  public: GazeboRosForce();
+  public: GazeboRosVacuumGripper();
 
   /// \brief Destructor
-  public: virtual ~GazeboRosForce();
+  public: virtual ~GazeboRosVacuumGripper();
 
   // Documentation inherited
   protected: void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
@@ -82,12 +79,15 @@ class GazeboRosForce : public ModelPlugin
   // Documentation inherited
   protected: virtual void UpdateChild();
 
-  /// \brief call back when a Wrench message is published
-  /// \param[in] _msg The Incoming ROS message representing the new force to exert.
-  private: void UpdateObjectForce(const geometry_msgs::Wrench::ConstPtr& _msg);
-
   /// \brief The custom callback queue thread function.
   private: void QueueThread();
+
+  private: bool OnServiceCallback(std_srvs::Empty::Request &req,
+                                std_srvs::Empty::Response &res);
+  private: bool OffServiceCallback(std_srvs::Empty::Request &req,
+                                std_srvs::Empty::Response &res);
+
+  private: bool status_;
 
   private: physics::ModelPtr parent_;
 
@@ -99,13 +99,16 @@ class GazeboRosForce : public ModelPlugin
 
   /// \brief A pointer to the ROS node.  A node will be instantiated if it does not exist.
   private: ros::NodeHandle* rosnode_;
-  private: ros::Subscriber sub_;
 
   /// \brief A mutex to lock access to fields that are used in ROS message callbacks
   private: boost::mutex lock_;
+  private: ros::Publisher pub_;
+  private: ros::ServiceServer srv1_;
+  private: ros::ServiceServer srv2_;
 
   /// \brief ROS Wrench topic name inputs
   private: std::string topic_name_;
+  private: std::string service_name_;
   /// \brief The Link this plugin is attached to, and will exert forces on.
   private: std::string link_name_;
 
@@ -116,11 +119,14 @@ class GazeboRosForce : public ModelPlugin
   private: ros::CallbackQueue queue_;
   /// \brief Thead object for the running callback Thread.
   private: boost::thread callback_queue_thread_;
-  /// \brief Container for the wrench force that this plugin exerts on the body.
-  private: geometry_msgs::Wrench wrench_msg_;
 
   // Pointer to the update event connection
   private: event::ConnectionPtr update_connection_;
+
+  /// \brief: keep track of number of connections
+  private: int connect_count_;
+  private: void Connect();
+  private: void Disconnect();
 };
 /** \} */
 /// @}
