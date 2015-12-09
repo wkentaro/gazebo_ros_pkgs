@@ -146,15 +146,23 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
 bool GazeboRosVacuumGripper::OnServiceCallback(std_srvs::Empty::Request &req,
                                      std_srvs::Empty::Response &res)
 {
-  status_ = true;
-  ROS_INFO("gazebo_ros_vacuum_gripper: status: off -> on");
+  if (status_) {
+    ROS_WARN("gazebo_ros_vacuum_gripper: already status is 'on'");
+  } else {
+    status_ = true;
+    ROS_INFO("gazebo_ros_vacuum_gripper: status: off -> on");
+  }
   return true;
 }
 bool GazeboRosVacuumGripper::OffServiceCallback(std_srvs::Empty::Request &req,
                                      std_srvs::Empty::Response &res)
 {
-  status_ = false;
-  ROS_INFO("gazebo_ros_vacuum_gripper: status: on -> off");
+  if (status_) {
+    status_ = false;
+    ROS_INFO("gazebo_ros_vacuum_gripper: status: on -> off");
+  } else {
+    ROS_WARN("gazebo_ros_vacuum_gripper: already status is 'off'");
+  }
   return true;
 }
 
@@ -183,12 +191,12 @@ void GazeboRosVacuumGripper::UpdateChild()
       math::Pose link_pose = links[j]->GetWorldPose();
       math::Pose diff = parent_pose - link_pose;
       double norm = diff.pos.GetLength();
-      if (norm < 0.3) {
+      if (norm < 0.2) {
         links[j]->SetLinearAccel(link_->GetWorldLinearAccel());
         links[j]->SetAngularAccel(link_->GetWorldAngularAccel());
         links[j]->SetLinearVel(link_->GetWorldLinearVel());
         links[j]->SetAngularVel(link_->GetWorldAngularVel());
-        double norm_force = 5 / norm;
+        double norm_force = 2 / norm;
         if (!printed) {
           ROS_INFO_STREAM("Inhaling " << models[i]->GetName() << " with force " << norm_force);
           printed = true;
@@ -199,9 +207,7 @@ void GazeboRosVacuumGripper::UpdateChild()
         math::Vector3 force = norm_force * diff.pos.Normalize();
         links[j]->AddForce(force);
       }
-      if (norm < 0.2) {
-        grasping_msg.data = true;
-      }
+      grasping_msg.data = true;
     }
   }
   pub_.publish(grasping_msg);
