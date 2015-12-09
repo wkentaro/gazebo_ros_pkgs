@@ -256,19 +256,19 @@ void GazeboRosOpenniKinect::FillPointdCloud(const float *_src)
 {
   this->lock_.lock();
 
-  this->point_cloud_msg_.header.frame_id = this->frame_name_;
-  this->point_cloud_msg_.header.stamp.sec = this->depth_sensor_update_time_.sec;
-  this->point_cloud_msg_.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
-  this->point_cloud_msg_.width = this->width;
-  this->point_cloud_msg_.height = this->height;
-  this->point_cloud_msg_.row_step = this->point_cloud_msg_.point_step * this->width;
-
   ///copy from depth to point cloud message
   FillPointCloudHelper(this->point_cloud_msg_,
                  this->height,
                  this->width,
                  this->skip_,
                  (void*)_src );
+
+  this->point_cloud_msg_.header.frame_id = this->frame_name_;
+  this->point_cloud_msg_.header.stamp.sec = this->depth_sensor_update_time_.sec;
+  this->point_cloud_msg_.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
+  this->point_cloud_msg_.width = this->width;
+  this->point_cloud_msg_.height = this->height;
+  this->point_cloud_msg_.row_step = this->point_cloud_msg_.point_step * this->width;
 
   this->point_cloud_pub_.publish(this->point_cloud_msg_);
 
