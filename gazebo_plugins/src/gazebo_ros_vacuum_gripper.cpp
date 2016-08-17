@@ -25,6 +25,7 @@
 #include <assert.h>
 
 #include <std_msgs/Bool.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <gazebo_plugins/gazebo_ros_vacuum_gripper.h>
 
 
@@ -36,7 +37,8 @@ GZ_REGISTER_MODEL_PLUGIN(GazeboRosVacuumGripper);
 // Constructor
 GazeboRosVacuumGripper::GazeboRosVacuumGripper()
 {
-  connect_count_ = 0;
+  gripper_state_connect_count_ = 0;
+  gripper_pose_connect_count_ = 0;
   status_ = false;
 }
 
@@ -111,6 +113,17 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
   }
 
   // Parameters for Vacuum Mechanism
+  // offset from the link
+  if (_sdf->HasElement("xyzOffset")) {
+    offset_.pos = _sdf->GetElement("xyzOffset")->Get<math::Vector3>();
+  } else {
+    offset_.pos = math::Vector3(0, 0, 0);
+  }
+  if (_sdf->HasElement("rpyOffset")) {
+    offset_.rot = _sdf->GetElement("rpyOffset")->Get<math::Vector3>();
+  } else {
+    offset_.rot = math::Vector3(0, 0, 0);
+  }
   // max force: [N]
   if (_sdf->HasElement("maxForce")) {
     max_force_ = _sdf->GetElement("maxForce")->Get<double>();
@@ -132,13 +145,21 @@ void GazeboRosVacuumGripper::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf
 
   rosnode_ = new ros::NodeHandle(robot_namespace_);
 
-  // Custom Callback Queue
-  ros::AdvertiseOptions ao = ros::AdvertiseOptions::create<std_msgs::Bool>(
+  // Custom Callback Queue for gripper state
+  ros::AdvertiseOptions gripper_state_ao = ros::AdvertiseOptions::create<std_msgs::Bool>(
     topic_name_, 1,
-    boost::bind(&GazeboRosVacuumGripper::Connect, this),
-    boost::bind(&GazeboRosVacuumGripper::Disconnect, this),
+    boost::bind(&GazeboRosVacuumGripper::GripperStateConnect, this),
+    boost::bind(&GazeboRosVacuumGripper::GripperStateDisconnect, this),
     ros::VoidPtr(), &queue_);
-  pub_ = rosnode_->advertise(ao);
+  pub_gripper_state_ = rosnode_->advertise(gripper_state_ao);
+
+  // Custom Callback Queue for gripper pose
+  ros::AdvertiseOptions gripper_pose_ao = ros::AdvertiseOptions::create<geometry_msgs::PoseStamped>(
+    "gripper_pose", 1,
+    boost::bind(&GazeboRosVacuumGripper::GripperPoseConnect, this),
+    boost::bind(&GazeboRosVacuumGripper::GripperPoseDisconnect, this),
+    ros::VoidPtr(), &queue_);
+  pub_gripper_pose_ = rosnode_->advertise(gripper_pose_ao);
 
   // Custom Callback Queue
   ros::AdvertiseServiceOptions aso1 =
@@ -191,15 +212,44 @@ bool GazeboRosVacuumGripper::OffServiceCallback(std_srvs::Empty::Request &req,
 // Update the controller
 void GazeboRosVacuumGripper::UpdateChild()
 {
+  lock_.lock();
+
+  // compute gripper pose and publish
+  math::Pose parent_pose = link_->GetWorldPose();
+  ROS_ERROR_STREAM("pose: " << parent_pose << ", offset: " << offset_);
+  math::Pose offset_world_pose;
+  offset_world_pose.pos = offset_.pos;
+  offset_world_pose.rot = offset_.rot;
+  offset_world_pose.pos = parent_pose.rot.RotateVectorReverse(offset_world_pose.pos);
+  offset_world_pose.rot = offset_world_pose.rot * parent_pose.rot.GetInverse();
+  parent_pose.pos = parent_pose.pos + offset_world_pose.pos;
+  parent_pose.rot = offset_world_pose.rot * parent_pose.rot;
+  parent_pose.rot.Normalize();
+  ROS_ERROR_STREAM("pose with offset: " << parent_pose);
+  common::Time cur_time = world_->GetSimTime();
+  geometry_msgs::PoseStamped pose_msg;
+  pose_msg.header.frame_id = "world";
+  pose_msg.header.stamp.sec = cur_time.sec;
+  pose_msg.header.stamp.nsec = cur_time.nsec;
+  pose_msg.pose.position.x = parent_pose.pos.x;
+  pose_msg.pose.position.y = parent_pose.pos.y;
+  pose_msg.pose.position.z = parent_pose.pos.z;
+  pose_msg.pose.orientation.x = parent_pose.rot.x;
+  pose_msg.pose.orientation.y = parent_pose.rot.y;
+  pose_msg.pose.orientation.z = parent_pose.rot.z;
+  pose_msg.pose.orientation.w = parent_pose.rot.w;
+  pub_gripper_pose_.publish(pose_msg);
+
+  // check gripper status
   std_msgs::Bool grasping_msg;
   grasping_msg.data = false;
   if (!status_) {
-    pub_.publish(grasping_msg);
+    pub_gripper_state_.publish(grasping_msg);
+    lock_.unlock();
     return;
   }
+
   // apply force
-  lock_.lock();
-  math::Pose parent_pose = link_->GetWorldPose();
   physics::Model_V models = world_->GetModels();
   for (size_t i = 0; i < models.size(); i++) {
     if (models[i]->GetName() == link_->GetName() ||
@@ -234,7 +284,7 @@ void GazeboRosVacuumGripper::UpdateChild()
       }
     }
   }
-  pub_.publish(grasping_msg);
+  pub_gripper_state_.publish(grasping_msg);
   lock_.unlock();
 }
 
@@ -252,17 +302,25 @@ void GazeboRosVacuumGripper::QueueThread()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Someone subscribes to me
-void GazeboRosVacuumGripper::Connect()
+// For gripper state
+void GazeboRosVacuumGripper::GripperStateConnect()
 {
-  this->connect_count_++;
+  gripper_state_connect_count_++;
+}
+void GazeboRosVacuumGripper::GripperStateDisconnect()
+{
+  gripper_state_connect_count_--;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Someone subscribes to me
-void GazeboRosVacuumGripper::Disconnect()
+// For gripper pose
+void GazeboRosVacuumGripper::GripperPoseConnect()
 {
-  this->connect_count_--;
+  gripper_pose_connect_count_++;
+}
+void GazeboRosVacuumGripper::GripperPoseDisconnect()
+{
+  gripper_pose_connect_count_--;
 }
 
 }  // namespace gazebo

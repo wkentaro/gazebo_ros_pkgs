@@ -129,7 +129,8 @@ class GazeboRosVacuumGripper : public ModelPlugin
 
   /// \brief A mutex to lock access to fields that are used in ROS message callbacks
   private: boost::mutex lock_;
-  private: ros::Publisher pub_;
+  private: ros::Publisher pub_gripper_state_;
+  private: ros::Publisher pub_gripper_pose_;
   private: ros::ServiceServer srv1_;
   private: ros::ServiceServer srv2_;
 
@@ -143,6 +144,7 @@ class GazeboRosVacuumGripper : public ModelPlugin
   private: std::string robot_namespace_;
 
   /// \brief vacuum mechanism parameters
+  private: math::Pose offset_;
   private: double max_force_;
   private: double max_distance_;
   private: double min_distance_;
@@ -155,10 +157,15 @@ class GazeboRosVacuumGripper : public ModelPlugin
   // Pointer to the update event connection
   private: event::ConnectionPtr update_connection_;
 
-  /// \brief: keep track of number of connections
-  private: int connect_count_;
-  private: void Connect();
-  private: void Disconnect();
+  /// \brief: keep track of number of connections for gripper state
+  private: int gripper_state_connect_count_;
+  private: void GripperStateConnect();
+  private: void GripperStateDisconnect();
+
+  /// \brief: keep track of number of connections for gripper pose
+  private: int gripper_pose_connect_count_;
+  private: void GripperPoseConnect();
+  private: void GripperPoseDisconnect();
 };
 /** \} */
 /// @}
